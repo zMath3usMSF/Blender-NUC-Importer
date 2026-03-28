@@ -16,6 +16,9 @@ class nucArmature(BrStruct):
                             for i in range(self.boneCount)}
         
         self.finalize()
+
+        while br.pos() % 4 != 0:
+            br.seek(br.pos() + 1)
         
     def finalize(self):
         for i, bone in self.bones.items():

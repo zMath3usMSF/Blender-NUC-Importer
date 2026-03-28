@@ -1,17 +1,17 @@
 import bpy
 import bmesh
-import struct
 import os
+import sys
 import ctypes
 from mathutils import Vector, Quaternion, Matrix
 from bpy.props import StringProperty, BoolProperty, CollectionProperty, FloatProperty
 from bpy_extras.io_utils import ImportHelper
-from time import perf_counter, time
-from .nuc_lib.nuc import *
+from time import time
+
+sys.path.insert(0, os.path.dirname(__file__))
+from nuc_lib.nuc import readNUC, loadToBlender
 
 DBG = True
-
-_ea_swizzle_dll = None
 
 class NUC_IMPORTER_OT_IMPORTER(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.sraw"
@@ -20,24 +20,15 @@ class NUC_IMPORTER_OT_IMPORTER(bpy.types.Operator, ImportHelper):
     files: CollectionProperty(type=bpy.types.OperatorFileListElement)
     filepath: StringProperty(subtype='FILE_PATH')
     directory: StringProperty(subtype='DIR_PATH')
+    scale: FloatProperty(name="Scale", default=0.128, min=0.001, max=1000.0)
 
     def execute(self, context):
         start_time = time()
-        nucFiles = []
-
         for file in self.files:
-
             self.filepath = os.path.join(self.directory, file.name)
-            
-            nucFile = readNUC(self.filepath)
-
-            nucFiles.append(nucFile)
-
-        elapsed_s = "{:.2f}s".format(time() - start_time)
-        print(f"NUC files imported in " + elapsed_s)
-        
+            loadToBlender(self, context, self.filepath, self.scale)
+        print(f"NUC files imported in {time() - start_time:.2f}s")
         return {'FINISHED'}
     
     def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
+        self.layout.use_property_split = True
