@@ -44,7 +44,7 @@ class Mesh(BrStruct):
         self.meshMaterialDataOffs = None
         self.meshUnkColor = None
 
-    def __br_read__(self, br: BinaryReader):
+    def __br_read__(self, br: BinaryReader, Armature: nucArmature):
         meshDataHeaderOffs = br.read_uint32()
         meshDataStartOffs = br.read_uint32()
         meshUnk1DataOffs = br.read_uint32()
@@ -53,6 +53,7 @@ class Mesh(BrStruct):
         self.meshUnk2Flag = br.read_uint32()
         meshMaterialDataOffs = br.read_uint32()
         self.meshUnkColor = br.read_uint32()
+        armature = Armature
 
         offset = meshDataStartOffs
         with br.seek_to(meshDataHeaderOffs):
@@ -63,133 +64,127 @@ class Mesh(BrStruct):
             color_group = []
             uvs_group = []
             chunkIndices = []
-            faces_group = []    
+            faces_group = []   
+            masterBone = 0 
+            clear = 0
             boneList = []    
             vertexCount = 0
             otherCount = 0
+            other2Count = 0
             while True:
                 meshData = br.read_struct(MeshData)
+                if meshData.type == MeshDataType.VertexInsert:
+                    boneList.append(meshData.boneIndex)
                 chunkData = []   
                 chunkDataStart = brChunk.pos()
-                if meshData.type == MeshDataType.Vertex:
-                    boneList.append(meshData.boneIndex)
-                while brChunk.pos() < chunkDataStart + meshData.length:
-                    unk1 = brChunk.read_uint8()
-                    unk2 = brChunk.read_uint8()
-                    count = brChunk.read_uint8()
-                    type = brChunk.read_uint8()
+                if meshData.arg1 == 0 and meshData.type in (MeshDataType.VertexInsert, MeshDataType.VertexReuse, MeshDataType.InitModel):
+                    while brChunk.pos() < chunkDataStart + meshData.length:
+                        flag1 = brChunk.read_uint8()
+                        flag2 = brChunk.read_uint8()
+                        count = brChunk.read_uint8()
+                        type = brChunk.read_uint8()
 
-                    if type not in (0x0, 0x1, 0x14, 0x62):
-                        chunkData = self.readChunk(brChunk, type, count)
+                        if type not in (0x0, 0x1, 0x14, 0x62):
+                            chunkData = self.readChunk(brChunk, type, count)
 
-                    if type == 0x62:
-                        chunkIndices = self.readChunk(brChunk, type, count)
+                        if type == 0x62:
+                            chunkIndices = self.readChunk(brChunk, type, count)
 
-                    if type == 0x14:
-                        try:
-                            chunkType = BlockType(unk1)
-                            if chunkType != BlockType.ReadFace:
-                                    if len(faces_group) != 0:
-                                        self.faces.append(faces_group)
-                                        faces_group = []
-                            if chunkType == BlockType.ReadVertex:
-                                for i in range(len(chunkIndices)):
-                                    if meshData.type == MeshDataType.Other:
-                                        vertex = MeshVertex(chunkData[i], chunkIndices[i][0], boneList[otherCount - 1])
-                                        vertex_group.append(vertex)
-                                    else:
-                                        vertex = MeshVertex(chunkData[i], chunkIndices[i][0], meshData.boneIndex)
-                                        vertex_group.append(vertex)
+                        if type == 0x14:
+                            try:
+                                # armature.boneParents[boneList[0]]
+                                chunkType = BlockType(flag1)                            
+                                if chunkType != BlockType.ReadFace:
+                                        if len(faces_group) != 0:
+                                            self.faces.append(faces_group)
+                                            faces_group = []
+                                if chunkType == BlockType.ReadVertex:    
+                                    for i in range(len(chunkIndices)):
+                                            if meshData.type == MeshDataType.VertexReuse:
+                                                vertex = MeshVertex(chunkData[i], chunkIndices[i][0], self.vertices[-1][0].boneIndex)
+                                                vertex_group.append(vertex)
+                                            else:
+                                                vertex = MeshVertex(chunkData[i], chunkIndices[i][0], meshData.boneIndex)
+                                                vertex_group.append(vertex)
+                                elif chunkType == BlockType.ReadVertex2:                                
+                                    for i in range(len(chunkIndices)):                                            
+                                            if meshData.type == MeshDataType.VertexReuse:
+                                                vertex = MeshVertex(chunkData[i], chunkIndices[i][0], self.vertices[-1][0].boneIndex)
+                                                vertex_group.append(vertex)
+                                            else:
+                                                vertex = MeshVertex(chunkData[i], chunkIndices[i][0], meshData.boneIndex)
+                                                vertex_group.append(vertex)
+                                elif chunkType == BlockType.SaveVertex or chunkType == BlockType.SaveAndUpdateVertex:
+                                    if meshData.type == MeshDataType.VertexReuse:
+                                        if len(faces_group) != 0:
+                                            self.faces.append(faces_group)
+                                            faces_group = []
 
-                            elif chunkType == BlockType.ReadVertex2:
-                                for i in range(len(chunkIndices)):
-                                    if meshData.type == MeshDataType.Other:
-                                        vertex = MeshVertex(chunkData[i], chunkIndices[i][0], boneList[otherCount - 1])
-                                        vertex_group.append(vertex)
-                                    else:
-                                        vertex = MeshVertex(chunkData[i], chunkIndices[i][0], boneList[otherCount - 1])
-                                        vertex_group.append(vertex)
+                                        vertex_by_index = {v.index: v for v in vertex_group}
+                                        last_vertex_group = [v.clone() for v in self.vertices[-1]]
+                                        
+                                        existing_indices = {v.index for v in last_vertex_group}
+                                        
+                                        # Substitui os que já existem
+                                        for i, v in enumerate(last_vertex_group):
+                                            if v.index in vertex_by_index:
+                                                last_vertex_group[i] = vertex_by_index[v.index]
+                                        
+                                        # Adiciona os que são novos (não estavam no grupo anterior)
+                                        for v in vertex_group:
+                                            if v.index not in existing_indices:
+                                                last_vertex_group.append(v)
+                                        
+                                        self.vertices.append(last_vertex_group)
+                                        vertex_group = []
+                                    else:                                    
+                                        saved = []
+                                        for i in range(len(chunkIndices)):
+                                            for j in range(len(vertex_group)):
+                                                if chunkIndices[i][0] == vertex_group[j].index:
+                                                    saved.append(vertex_group[j])
+                                                    break
+                                        self.vertices.append(saved)
+                                        vertex_group = []
+                                        clear = 1      
+                                elif chunkType == BlockType.ReadFace:
+                                    chunkData.pop(0)
+                                    for data in chunkData:
+                                        faces_group.append(MeshFace(data, 0))
 
-                            elif chunkType in (BlockType.ReadVertexUnk1A, BlockType.ReadVertexUnk1C):
-                                vertex_by_index = {v.index: v for v in vertex_group}
-                                for i in range(len(chunkIndices)):
-                                    idx = chunkIndices[i][0]
-                                    if idx in vertex_by_index:
-                                        br_v = BinaryReader(chunkData[i])
-                                        x, y, z, w = br_v.read_float32(), br_v.read_float32(), br_v.read_float32(), br_v.read_float32()
-                                        if meshData.type == MeshDataType.Other:
-                                            vertex_by_index[idx].extraData.append((boneList[otherCount - 1], w, x, y, z))
-                                        else:
-                                            vertex_by_index[idx].extraData.append((meshData.boneIndex, w, x, y, z))
-                                        vertex_by_index[idx].finalize_weights()
+                                elif chunkType == BlockType.ReadAndSaveVertexNormal:
+                                    for data in chunkData:
+                                        normal_group.append(MeshVertexNormal(data))
+                                    self.normals.append(normal_group)
+                                    normal_group = []
 
-                            elif chunkType == BlockType.SaveVertex:
-                                saved = []
-                                for i in range(len(chunkIndices)):
-                                    for j in range(len(vertex_group)):
-                                        if chunkIndices[i][0] == vertex_group[j].index:
-                                            saved.append(vertex_group[j])
-                                            break
-                                self.vertices.append(saved)
-                                vertex_group = []
-                                                        
-                            elif chunkType == BlockType.SaveAndUpdateVertex:
-                                if meshData.type == MeshDataType.Other:
-                                    if len(faces_group) != 0:
-                                        self.faces.append(faces_group)
-                                        faces_group = []
+                                elif chunkType == BlockType.ReadAndSaveVertexColor:
+                                    for data in chunkData:
+                                        color_group.append(MeshVertexColor(data))
+                                    self.color.append(color_group)
+                                    color_group = []
 
-                                vertex_by_index = {v.index: v for v in vertex_group}
-                                last_vertex_group = [v.clone() for v in self.vertices[-1]]
-                                
-                                existing_indices = {v.index for v in last_vertex_group}
-                                
-                                # Substitui os que já existem
-                                for i, v in enumerate(last_vertex_group):
-                                    if v.index in vertex_by_index:
-                                        last_vertex_group[i] = vertex_by_index[v.index]
-                                
-                                # Adiciona os que são novos (não estavam no grupo anterior)
-                                for v in vertex_group:
-                                    if v.index not in existing_indices:
-                                        last_vertex_group.append(v)
-                                
-                                self.vertices.append(last_vertex_group)
-                                vertex_group = []
+                                elif chunkType == BlockType.ReadAndSaveUV:
+                                    for data in chunkData:
+                                        uvs_group.append(MeshUV(data))
+                                    self.uvs.append(uvs_group)
+                                    uvs_group = []
+                            except:
+                                print(f"Unk 0x{flag1:02X}")
 
-                            elif chunkType == BlockType.ReadFace:
-                                chunkData.pop(0)
-                                for data in chunkData:
-                                    faces_group.append(MeshFace(data, 0))
-
-                            elif chunkType == BlockType.ReadAndSaveVertexNormal:
-                                for data in chunkData:
-                                    normal_group.append(MeshVertexNormal(data))
-                                self.normals.append(normal_group)
-                                normal_group = []
-
-                            elif chunkType == BlockType.ReadAndSaveVertexColor:
-                                for data in chunkData:
-                                    color_group.append(MeshVertexColor(data))
-                                self.color.append(color_group)
-                                color_group = []
-
-                            elif chunkType == BlockType.ReadAndSaveUV:
-                                for data in chunkData:
-                                    uvs_group.append(MeshUV(data))
-                                self.uvs.append(uvs_group)
-                                uvs_group = []
-                        except:
-                            print(f"Unk 0x{unk1:02X}")
-
-                self.meshFlags.append(meshData)
-                if meshData.type == MeshDataType.Vertex:
-                    vertexCount += 1
-                if meshData.type == MeshDataType.Other:
-                    otherCount += 1
-                    if len(faces_group) != 0:
-                        self.faces.append(faces_group)
-                        faces_group = []
+                    self.meshFlags.append(meshData)
+                    if meshData.type == MeshDataType.VertexReuse:
+                        otherCount += 1
+                        if len(faces_group) != 0:
+                            self.faces.append(faces_group)
+                            faces_group = []
+                    if meshData.type == MeshDataType.InitModel and len(self.vertices) != 0:
+                        other2Count += 1
+                        if len(faces_group) != 0:
+                            self.faces.append(faces_group)
+                            faces_group = []
+                else:
+                    brChunk.seek(chunkDataStart + meshData.length)
                 if meshData.type == MeshDataType.End:
                     break
 
@@ -219,8 +214,8 @@ class Mesh(BrStruct):
 class MeshDataType(Enum):
     End = 0x00
     InitSystem = 0x01
-    Vertex = 0x02
-    Other = 0x03
+    VertexInsert = 0x02
+    VertexReuse = 0x03
     InitModel = 0x04
     CelShade = 0x08
 
@@ -256,13 +251,8 @@ class MeshVertex:
     def clone(self):
         import copy
         c = copy.copy(self)
-        c.extraData = list(self.extraData)  # copia a lista de extras
+        c.extraData = list(self.extraData)
         return c
-
-    def finalize_weights(self):
-        """Chame depois de todos os extraData serem adicionados."""
-        extra_sum = sum(w for _, w, *_ in self.extraData)
-        self.weight = max(0.0, 1.0 - extra_sum)
 
 class MeshVertexNormal:
     def __init__(self, chunkData):
@@ -301,6 +291,9 @@ class nucModel(BrStruct):
         self.meshCount = 0
     
     def __br_read__(self, br: BinaryReader, Armature: nucArmature, meshCount):
-        self.mesh = {i: br.read_struct(Mesh)
-                for i in range(meshCount)}
+        self.mesh = {}
+        for i in range(meshCount):
+            mesh = Mesh()
+            mesh.__br_read__(br, Armature)
+            self.mesh[i] = mesh
             

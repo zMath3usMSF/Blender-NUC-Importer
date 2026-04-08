@@ -12,7 +12,6 @@ from nuc_lib.nucModel import MeshVertex, MeshVertexNormal, MeshUV, MeshFace
 
 AXIS_CONV = Matrix.Rotation(math.radians(-90), 4, 'X')
 
-
 def _bone_world_matrix(bones: dict, bone_idx: int, cache: dict) -> Matrix:
     if bone_idx in cache:
         return cache[bone_idx]
@@ -89,23 +88,17 @@ def build_armature(context, armature, base_name: str, scale: float = 1.0):
 
 def _vertex_position(v: MeshVertex, armature, cache: dict, scale: float) -> Vector:
     local = Vector((v.x, v.y, v.z))
-    bone_mat = _bone_world_matrix(armature.bones, v.boneIndex, cache) if armature and v.boneIndex in armature.bones else Matrix.Identity(4)
-    pos_base = (AXIS_CONV @ bone_mat) @ local
-    pos = pos_base * v.weight
-
-    if v.extraData:
-        print(f"[VTX idx={v.index} bone={v.boneIndex}]")
-        print(f"  base xyz=({v.x:.3f}, {v.y:.3f}, {v.z:.3f}) w={v.weight:.3f} → {pos_base}")
-        for bone_idx, weight, x, y, z in v.extraData:
-            extra_mat = _bone_world_matrix(armature.bones, bone_idx, cache) if armature and bone_idx in armature.bones else Matrix.Identity(4)
-            contrib = (AXIS_CONV @ extra_mat) @ Vector((x, y, z))
-            print(f"  extra bone={bone_idx} xyz=({x:.3f},{y:.3f},{z:.3f}) w={weight:.3f} → {contrib}")
-            pos += contrib * weight
-
-        print(f"  final pos = {pos * scale}")
-    else:
-        pos = pos_base * v.weight
-
+    bone_mat = (
+        _bone_world_matrix(armature.bones, v.boneIndex, cache)
+        if armature and v.boneIndex in armature.bones
+        else Matrix.Identity(4)
+    )
+    
+    pos = (AXIS_CONV @ bone_mat) @ local
+    
+    if v.weight > 0:
+        pos = pos / (v.weight ** 0.1)
+    
     return pos * scale
 
 
@@ -213,10 +206,11 @@ def build_submesh(context, vertices, normals, uvs, faces,
 
     vg_map = {}
     for vi, v in enumerate(vertices):
+        print(f"[VG] vi={vi} bone={v.boneIndex} weight={v.weight:.4f}")
         vg_name = f"bone_{v.boneIndex:02d}"
         if vg_name not in vg_map:
             vg_map[vg_name] = obj.vertex_groups.new(name=vg_name)
-        vg_map[vg_name].add([vi], 1.0, 'REPLACE')
+        vg_map[vg_name].add([vi], v.weight, 'REPLACE')
 
     if arm_obj:
         obj.parent = arm_obj

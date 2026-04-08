@@ -21,12 +21,16 @@ class nucArmature(BrStruct):
             br.seek(br.pos() + 1)
         
     def finalize(self):
+        print(f"boneParents: {self.boneParents}")
         for i, bone in self.bones.items():
             parentIndex = self.boneParents[i]
             if parentIndex == i or parentIndex == 0xFFFF:
                 bone.parent = None
+                bone.parentIndex = None
             else:
                 bone.parent = self.bones.get(parentIndex)
+                bone.parentIndex = parentIndex
+            print(f"  bone {i:02d} → parent {parentIndex} → parentIndex={bone.parentIndex}")
 
 
 class Bone(BrStruct):
